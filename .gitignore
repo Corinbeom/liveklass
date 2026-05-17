@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Spring Boot
+*.log
+/logs/
+
+# Env
+.env
+application-local.yml
+
+# Claude Code
+CLAUDE.md
