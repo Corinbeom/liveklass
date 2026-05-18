@@ -2,7 +2,7 @@ spring:
   application:
     name: liveclass
   datasource:
-    url: jdbc:postgresql://localhost:5432/liveclass
+    url: jdbc:postgresql://localhost:${DB_PORT:5432}/liveclass
     username: liveclass
     password: liveclass
     driver-class-name: org.postgresql.Driver
