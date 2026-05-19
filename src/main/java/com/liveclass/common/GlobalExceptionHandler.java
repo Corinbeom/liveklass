@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -22,6 +23,15 @@ public class GlobalExceptionHandler {
                 .status(errorCode.getHttpStatus())
                 .body(ApiResponse.failure(new ApiResponse.ErrorResponse(
                         errorCode.name(), errorCode.getMessage()
+                )));
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingRequestHeaderException(MissingRequestHeaderException e) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.failure(new ApiResponse.ErrorResponse(
+                        "MISSING_HEADER", e.getHeaderName() + " 헤더가 필요합니다."
                 )));
     }
 

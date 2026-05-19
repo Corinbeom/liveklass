@@ -80,7 +80,7 @@ public class EnrollmentService {
             course.decreaseEnrolledCount();
 
             enrollmentRepository.findFirstByCourseIdAndStatusOrderByCreatedAtAsc(
-                    course.getId(), EnrollmentStatus.PENDING
+                    enrollment.getCourseId(), EnrollmentStatus.PENDING
             ).ifPresent(waiting -> {
                 waiting.confirm();
                 course.increaseEnrolledCount();
