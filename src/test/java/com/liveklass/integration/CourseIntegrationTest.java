@@ -94,6 +94,19 @@ class CourseIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("강의 상태를 CLOSED로 변경할 수 있다")
+    void updateStatus_openToClosed() throws Exception {
+        Course course = savedOpenCourse(30);
+
+        mockMvc.perform(patch("/api/courses/" + course.getId() + "/status")
+                        .header("X-User-Id", 1L)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new CourseStatusUpdateRequest(CourseStatus.CLOSED))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CLOSED"));
+    }
+
+    @Test
     @DisplayName("상태 필터로 강의 목록을 조회할 수 있다")
     void findAll_withStatusFilter() throws Exception {
         savedOpenCourse(30);

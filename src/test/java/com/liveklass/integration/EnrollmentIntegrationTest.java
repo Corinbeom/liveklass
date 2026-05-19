@@ -3,19 +3,27 @@ package com.liveklass.integration;
 import com.liveklass.course.Course;
 import com.liveklass.course.CourseStatus;
 import com.liveklass.enrollment.Enrollment;
+import com.liveklass.enrollment.EnrollmentStatus;
 import com.liveklass.enrollment.dto.EnrollmentRequest;
 import com.liveklass.support.IntegrationTestSupport;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class EnrollmentIntegrationTest extends IntegrationTestSupport {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private Course openCourse(int capacity) {
         Course course = new Course(1L, "테스트 강의", "설명", BigDecimal.valueOf(10000), capacity,
@@ -113,6 +121,60 @@ class EnrollmentIntegrationTest extends IntegrationTestSupport {
 
         Course updated = courseRepository.findById(course.getId()).orElseThrow();
         org.assertj.core.api.Assertions.assertThat(updated.getEnrolledCount()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("CONFIRMED 취소 시 enrolledCount가 감소하고 대기자는 PENDING 상태를 유지한다")
+    void cancel_waitlistRemainsePending() throws Exception {
+        Course course = openCourse(1);
+
+        Enrollment first = enrollmentRepository.save(new Enrollment(1L, course.getId()));
+        mockMvc.perform(post("/api/enrollments/" + first.getId() + "/confirm")
+                .header("X-User-Id", 1L))
+                .andExpect(status().isOk());
+
+        Enrollment waiting = enrollmentRepository.save(new Enrollment(2L, course.getId()));
+
+        mockMvc.perform(post("/api/enrollments/" + first.getId() + "/cancel")
+                        .header("X-User-Id", 1L))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+
+        assertThat(enrollmentRepository.findById(waiting.getId()).orElseThrow().getStatus())
+                .isEqualTo(EnrollmentStatus.PENDING);
+        assertThat(courseRepository.findById(course.getId()).orElseThrow().getEnrolledCount())
+                .isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("본인 신청이 아닌 경우 취소 시 403을 반환한다")
+    void cancel_unauthorized() throws Exception {
+        Course course = openCourse(30);
+        Enrollment enrollment = enrollmentRepository.save(new Enrollment(1L, course.getId()));
+
+        mockMvc.perform(post("/api/enrollments/" + enrollment.getId() + "/cancel")
+                        .header("X-User-Id", 2L))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    @DisplayName("결제 후 7일이 초과된 경우 취소 시 409를 반환한다")
+    void cancel_expiredPeriod() throws Exception {
+        Course course = openCourse(30);
+        Enrollment enrollment = enrollmentRepository.save(new Enrollment(1L, course.getId()));
+
+        mockMvc.perform(post("/api/enrollments/" + enrollment.getId() + "/confirm")
+                .header("X-User-Id", 1L))
+                .andExpect(status().isOk());
+
+        jdbcTemplate.update("UPDATE enrollments SET confirmed_at = ? WHERE id = ?",
+                LocalDateTime.now().minusDays(8), enrollment.getId());
+
+        mockMvc.perform(post("/api/enrollments/" + enrollment.getId() + "/cancel")
+                        .header("X-User-Id", 1L))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("CANCEL_PERIOD_EXPIRED"));
     }
 
     @Test

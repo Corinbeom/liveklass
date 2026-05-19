@@ -78,13 +78,8 @@ public class EnrollmentService {
             Course course = courseRepository.findByIdWithLock(enrollment.getCourseId())
                     .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
             course.decreaseEnrolledCount();
-
-            enrollmentRepository.findFirstByCourseIdAndStatusOrderByCreatedAtAsc(
-                    enrollment.getCourseId(), EnrollmentStatus.PENDING
-            ).ifPresent(waiting -> {
-                waiting.confirm();
-                course.increaseEnrolledCount();
-            });
+            // 자리가 생기면 알림 시스템을 통해 대기자에게 통보하고,
+            // 대기자가 직접 confirm API를 호출해 수강을 확정합니다.
         }
 
         return EnrollmentResponse.from(enrollment);

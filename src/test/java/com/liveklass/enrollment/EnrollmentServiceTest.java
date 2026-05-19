@@ -123,25 +123,20 @@ class EnrollmentServiceTest {
     }
 
     @Test
-    @DisplayName("CONFIRMED 취소 시 enrolledCount가 감소하고 대기자가 자동 승격된다")
-    void cancel_promotesWaitlist() {
+    @DisplayName("CONFIRMED 취소 시 enrolledCount가 감소한다")
+    void cancel_decreasesEnrolledCount() {
         Course course = openCourse(1);
         course.increaseEnrolledCount();
 
         Enrollment confirmed = new Enrollment(2L, 1L);
         confirmed.confirm();
 
-        Enrollment waiting = new Enrollment(3L, 1L);
-
         when(enrollmentRepository.findById(1L)).thenReturn(Optional.of(confirmed));
         when(courseRepository.findByIdWithLock(1L)).thenReturn(Optional.of(course));
-        when(enrollmentRepository.findFirstByCourseIdAndStatusOrderByCreatedAtAsc(1L, EnrollmentStatus.PENDING))
-                .thenReturn(Optional.of(waiting));
 
         enrollmentService.cancel(1L, 2L);
 
         assertThat(confirmed.getStatus()).isEqualTo(EnrollmentStatus.CANCELLED);
-        assertThat(waiting.getStatus()).isEqualTo(EnrollmentStatus.CONFIRMED);
-        assertThat(course.getEnrolledCount()).isEqualTo(1);
+        assertThat(course.getEnrolledCount()).isEqualTo(0);
     }
 }
