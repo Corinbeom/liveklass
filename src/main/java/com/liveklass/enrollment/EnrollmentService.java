@@ -7,6 +7,7 @@ import com.liveklass.course.CourseRepository;
 import com.liveklass.course.CourseStatus;
 import com.liveklass.enrollment.dto.EnrollmentRequest;
 import com.liveklass.enrollment.dto.EnrollmentResponse;
+import com.liveklass.enrollment.dto.WaitlistPositionResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -92,6 +93,15 @@ public class EnrollmentService {
     public Page<EnrollmentResponse> findMyEnrollments(Long userId, Pageable pageable) {
         return enrollmentRepository.findByUserId(userId, pageable)
                 .map(EnrollmentResponse::from);
+    }
+
+    public WaitlistPositionResponse getWaitlistPosition(Long courseId, Long userId) {
+        Enrollment enrollment = enrollmentRepository.findByUserIdAndCourseIdAndStatus(
+                userId, courseId, EnrollmentStatus.PENDING)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
+
+        long position = enrollmentRepository.countPendingBefore(courseId, enrollment.getCreatedAt()) + 1;
+        return new WaitlistPositionResponse(enrollment.getId(), courseId, position);
     }
 
     public Page<EnrollmentResponse> findByCourse(Long courseId, Long requesterId, Pageable pageable) {
