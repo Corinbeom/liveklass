@@ -35,6 +35,10 @@ public class EnrollmentService {
             throw new BusinessException(ErrorCode.COURSE_NOT_OPEN);
         }
 
+        if (course.getCreatorId().equals(userId)) {
+            throw new BusinessException(ErrorCode.CREATOR_CANNOT_ENROLL);
+        }
+
         boolean alreadyEnrolled = enrollmentRepository.existsByUserIdAndCourseIdAndStatusIn(
                 userId, course.getId(), List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED)
         );

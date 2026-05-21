@@ -16,7 +16,8 @@ public enum ErrorCode {
     CANCEL_PERIOD_EXPIRED(HttpStatus.CONFLICT, "취소 가능 기간이 지났습니다."),
 
     // Auth
-    UNAUTHORIZED(HttpStatus.FORBIDDEN, "권한이 없습니다.");
+    UNAUTHORIZED(HttpStatus.FORBIDDEN, "권한이 없습니다."),
+    CREATOR_CANNOT_ENROLL(HttpStatus.BAD_REQUEST, "자신이 개설한 강의에는 수강 신청할 수 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String message;

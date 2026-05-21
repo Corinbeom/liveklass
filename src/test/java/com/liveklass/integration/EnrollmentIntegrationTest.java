@@ -38,7 +38,7 @@ class EnrollmentIntegrationTest extends IntegrationTestSupport {
         Course course = openCourse(30);
 
         mockMvc.perform(post("/api/enrollments")
-                        .header("X-User-Id", 1L)
+                        .header("X-User-Id", 2L)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new EnrollmentRequest(course.getId()))))
                 .andExpect(status().isCreated())
@@ -61,13 +61,26 @@ class EnrollmentIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("같은 강의에 중복 신청 시 409를 반환한다")
-    void enroll_duplicate() throws Exception {
-        Course course = openCourse(30);
-        enrollmentRepository.save(new Enrollment(1L, course.getId()));
+    @DisplayName("크리에이터가 본인 강의에 수강 신청 시 400을 반환한다")
+    void enroll_creatorCannotEnroll() throws Exception {
+        Course course = openCourse(30); // creatorId = 1L
 
         mockMvc.perform(post("/api/enrollments")
                         .header("X-User-Id", 1L)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new EnrollmentRequest(course.getId()))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("CREATOR_CANNOT_ENROLL"));
+    }
+
+    @Test
+    @DisplayName("같은 강의에 중복 신청 시 409를 반환한다")
+    void enroll_duplicate() throws Exception {
+        Course course = openCourse(30);
+        enrollmentRepository.save(new Enrollment(2L, course.getId()));
+
+        mockMvc.perform(post("/api/enrollments")
+                        .header("X-User-Id", 2L)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new EnrollmentRequest(course.getId()))))
                 .andExpect(status().isConflict())

@@ -50,7 +50,7 @@ class EnrollmentServiceTest {
         when(enrollmentRepository.existsByUserIdAndCourseIdAndStatusIn(any(), any(), any())).thenReturn(false);
         when(enrollmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        EnrollmentResponse response = enrollmentService.enroll(1L, new EnrollmentRequest(1L));
+        EnrollmentResponse response = enrollmentService.enroll(2L, new EnrollmentRequest(1L));
 
         assertThat(response.status()).isEqualTo(EnrollmentStatus.PENDING);
     }
@@ -69,13 +69,25 @@ class EnrollmentServiceTest {
     }
 
     @Test
+    @DisplayName("크리에이터가 본인 강의에 수강 신청 시 예외가 발생한다")
+    void enroll_creatorCannotEnroll() {
+        Course course = openCourse(30); // creatorId = 1L
+        when(courseRepository.findById(1L)).thenReturn(Optional.of(course));
+
+        assertThatThrownBy(() -> enrollmentService.enroll(1L, new EnrollmentRequest(1L)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.CREATOR_CANNOT_ENROLL);
+    }
+
+    @Test
     @DisplayName("이미 신청한 강의에 중복 신청 시 예외가 발생한다")
     void enroll_alreadyEnrolled() {
         Course course = openCourse(30);
         when(courseRepository.findById(1L)).thenReturn(Optional.of(course));
         when(enrollmentRepository.existsByUserIdAndCourseIdAndStatusIn(any(), any(), any())).thenReturn(true);
 
-        assertThatThrownBy(() -> enrollmentService.enroll(1L, new EnrollmentRequest(1L)))
+        assertThatThrownBy(() -> enrollmentService.enroll(2L, new EnrollmentRequest(1L)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ALREADY_ENROLLED);
