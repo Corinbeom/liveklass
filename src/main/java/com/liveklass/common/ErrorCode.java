@@ -13,6 +13,9 @@ public enum ErrorCode {
     // Enrollment
     ENROLLMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "수강 신청을 찾을 수 없습니다."),
     ALREADY_ENROLLED(HttpStatus.CONFLICT, "이미 신청한 강의입니다."),
+    ALREADY_IN_WAITLIST(HttpStatus.CONFLICT, "이미 대기열에 등록되어 있습니다."),
+    COURSE_NOT_FULL(HttpStatus.BAD_REQUEST, "아직 자리가 있습니다. 수강 신청 API를 이용해주세요."),
+    WAITLIST_NOT_FOUND(HttpStatus.NOT_FOUND, "대기열 항목을 찾을 수 없습니다."),
     CANCEL_PERIOD_EXPIRED(HttpStatus.CONFLICT, "취소 가능 기간이 지났습니다."),
 
     // Auth
