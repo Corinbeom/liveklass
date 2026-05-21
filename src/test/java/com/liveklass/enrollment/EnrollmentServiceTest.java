@@ -32,6 +32,9 @@ class EnrollmentServiceTest {
     @Mock
     private CourseRepository courseRepository;
 
+    @Mock
+    private WaitlistRepository waitlistRepository;
+
     @InjectMocks
     private EnrollmentService enrollmentService;
 
@@ -43,11 +46,13 @@ class EnrollmentServiceTest {
     }
 
     @Test
-    @DisplayName("OPEN 강의에 수강 신청하면 PENDING 상태로 생성된다")
+    @DisplayName("OPEN 강의에 자리가 있으면 PENDING으로 수강 신청된다")
     void enroll_success() {
         Course course = openCourse(30);
-        when(courseRepository.findById(1L)).thenReturn(Optional.of(course));
+        when(courseRepository.findByIdWithLock(1L)).thenReturn(Optional.of(course));
         when(enrollmentRepository.existsByUserIdAndCourseIdAndStatusIn(any(), any(), any())).thenReturn(false);
+        when(waitlistRepository.existsByUserIdAndCourseId(any(), any())).thenReturn(false);
+        when(enrollmentRepository.countByCourseIdAndStatus(any(), any())).thenReturn(0L);
         when(enrollmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         EnrollmentResponse response = enrollmentService.enroll(2L, new EnrollmentRequest(1L));
@@ -60,9 +65,9 @@ class EnrollmentServiceTest {
     void enroll_courseNotOpen() {
         Course course = new Course(1L, "테스트", "설명", BigDecimal.valueOf(10000), 30,
                 LocalDate.now(), LocalDate.now().plusMonths(1));
-        when(courseRepository.findById(1L)).thenReturn(Optional.of(course));
+        when(courseRepository.findByIdWithLock(1L)).thenReturn(Optional.of(course));
 
-        assertThatThrownBy(() -> enrollmentService.enroll(1L, new EnrollmentRequest(1L)))
+        assertThatThrownBy(() -> enrollmentService.enroll(2L, new EnrollmentRequest(1L)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.COURSE_NOT_OPEN);
@@ -71,8 +76,8 @@ class EnrollmentServiceTest {
     @Test
     @DisplayName("크리에이터가 본인 강의에 수강 신청 시 예외가 발생한다")
     void enroll_creatorCannotEnroll() {
-        Course course = openCourse(30); // creatorId = 1L
-        when(courseRepository.findById(1L)).thenReturn(Optional.of(course));
+        Course course = openCourse(30);
+        when(courseRepository.findByIdWithLock(1L)).thenReturn(Optional.of(course));
 
         assertThatThrownBy(() -> enrollmentService.enroll(1L, new EnrollmentRequest(1L)))
                 .isInstanceOf(BusinessException.class)
@@ -84,13 +89,29 @@ class EnrollmentServiceTest {
     @DisplayName("이미 신청한 강의에 중복 신청 시 예외가 발생한다")
     void enroll_alreadyEnrolled() {
         Course course = openCourse(30);
-        when(courseRepository.findById(1L)).thenReturn(Optional.of(course));
+        when(courseRepository.findByIdWithLock(1L)).thenReturn(Optional.of(course));
         when(enrollmentRepository.existsByUserIdAndCourseIdAndStatusIn(any(), any(), any())).thenReturn(true);
 
         assertThatThrownBy(() -> enrollmentService.enroll(2L, new EnrollmentRequest(1L)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ALREADY_ENROLLED);
+    }
+
+    @Test
+    @DisplayName("정원이 꽉 찬 강의에 수강 신청 시 예외가 발생한다")
+    void enroll_courseFull() {
+        Course course = openCourse(1);
+        course.increaseEnrolledCount(); // enrolledCount = 1 = capacity
+        when(courseRepository.findByIdWithLock(1L)).thenReturn(Optional.of(course));
+        when(enrollmentRepository.existsByUserIdAndCourseIdAndStatusIn(any(), any(), any())).thenReturn(false);
+        when(waitlistRepository.existsByUserIdAndCourseId(any(), any())).thenReturn(false);
+        when(enrollmentRepository.countByCourseIdAndStatus(any(), any())).thenReturn(0L);
+
+        assertThatThrownBy(() -> enrollmentService.enroll(2L, new EnrollmentRequest(1L)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.COURSE_FULL);
     }
 
     @Test
@@ -108,21 +129,6 @@ class EnrollmentServiceTest {
     }
 
     @Test
-    @DisplayName("정원이 꽉 찬 강의 confirm 시 예외가 발생한다")
-    void confirm_courseFull() {
-        Course course = openCourse(1);
-        course.increaseEnrolledCount();
-        Enrollment enrollment = new Enrollment(1L, 1L);
-        when(enrollmentRepository.findById(1L)).thenReturn(Optional.of(enrollment));
-        when(courseRepository.findByIdWithLock(1L)).thenReturn(Optional.of(course));
-
-        assertThatThrownBy(() -> enrollmentService.confirm(1L, 1L))
-                .isInstanceOf(BusinessException.class)
-                .extracting("errorCode")
-                .isEqualTo(ErrorCode.COURSE_FULL);
-    }
-
-    @Test
     @DisplayName("본인 신청이 아닌 경우 confirm 시 예외가 발생한다")
     void confirm_unauthorized() {
         Enrollment enrollment = new Enrollment(1L, 1L);
@@ -135,7 +141,7 @@ class EnrollmentServiceTest {
     }
 
     @Test
-    @DisplayName("CONFIRMED 취소 시 enrolledCount가 감소한다")
+    @DisplayName("CONFIRMED 취소 시 CANCELLED가 되고 enrolledCount가 감소한다")
     void cancel_decreasesEnrolledCount() {
         Course course = openCourse(1);
         course.increaseEnrolledCount();
@@ -145,10 +151,32 @@ class EnrollmentServiceTest {
 
         when(enrollmentRepository.findById(1L)).thenReturn(Optional.of(confirmed));
         when(courseRepository.findByIdWithLock(1L)).thenReturn(Optional.of(course));
+        when(waitlistRepository.findFirstByCourseIdOrderByCreatedAtAsc(any())).thenReturn(Optional.empty());
 
         enrollmentService.cancel(1L, 2L);
 
         assertThat(confirmed.getStatus()).isEqualTo(EnrollmentStatus.CANCELLED);
         assertThat(course.getEnrolledCount()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("CONFIRMED 취소 시 대기열 1번이 PENDING으로 승격된다")
+    void cancel_promotesWaitlist() {
+        Course course = openCourse(1);
+        course.increaseEnrolledCount();
+
+        Enrollment confirmed = new Enrollment(2L, 1L);
+        confirmed.confirm();
+
+        Waitlist waiter = new Waitlist(1L, 3L);
+
+        when(enrollmentRepository.findById(1L)).thenReturn(Optional.of(confirmed));
+        when(courseRepository.findByIdWithLock(1L)).thenReturn(Optional.of(course));
+        when(waitlistRepository.findFirstByCourseIdOrderByCreatedAtAsc(1L)).thenReturn(Optional.of(waiter));
+        when(enrollmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        enrollmentService.cancel(1L, 2L);
+
+        assertThat(confirmed.getStatus()).isEqualTo(EnrollmentStatus.CANCELLED);
     }
 }

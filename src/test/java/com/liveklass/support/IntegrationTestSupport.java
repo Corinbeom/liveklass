@@ -3,6 +3,7 @@ package com.liveklass.support;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liveklass.course.CourseRepository;
 import com.liveklass.enrollment.EnrollmentRepository;
+import com.liveklass.enrollment.WaitlistRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -41,8 +42,12 @@ public abstract class IntegrationTestSupport {
     @Autowired
     protected EnrollmentRepository enrollmentRepository;
 
+    @Autowired
+    protected WaitlistRepository waitlistRepository;
+
     @BeforeEach
     void cleanUp() {
+        waitlistRepository.deleteAll();
         enrollmentRepository.deleteAll();
         courseRepository.deleteAll();
     }
