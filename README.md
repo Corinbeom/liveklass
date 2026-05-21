@@ -1,53 +1,24 @@
 # 수강 신청 시스템 (BE-A)
 
+## 프로젝트 개요
+
 크리에이터(강사)가 강의를 개설하고, 클래스메이트(수강생)가 신청·결제·취소하는 수강 신청 시스템입니다.
+핵심 관심사는 상태 전이, 정원 관리, 동시성 제어입니다.
 
-## 기술 스택
+### 도메인 모델
 
-- **Language**: Java 17
-- **Framework**: Spring Boot 3.x
-- **ORM**: Spring Data JPA (Hibernate)
-- **DB**: PostgreSQL 16
-- **Build**: Gradle
-- **Test**: JUnit 5, Mockito, Testcontainers
-
-## 실행 방법
-
-### 사전 요구사항
-- Java 17
-- Docker
-
-### 1. PostgreSQL 실행
-
-```bash
-docker-compose up -d
+```
+courses 1 ──── * enrollments
 ```
 
-### 2. 애플리케이션 실행
+| 테이블 | 주요 필드 |
+|---|---|
+| `courses` | id, creator_id, title, capacity, status(DRAFT/OPEN/CLOSED), enrolled_count |
+| `enrollments` | id, user_id, course_id, status(PENDING/CONFIRMED/CANCELLED), confirmed_at |
 
-```bash
-./gradlew bootRun
-```
-
-### 3. 테스트 실행
-
-Testcontainers가 PostgreSQL 컨테이너를 자동으로 실행합니다. Docker가 실행 중이어야 합니다.
-
-```bash
-./gradlew test
-```
-
-> 로컬에 PostgreSQL이 이미 5432 포트를 사용 중인 경우, `DB_PORT` 환경변수로 포트를 변경할 수 있습니다.
-> ```bash
-> DB_PORT=5433 ./gradlew bootRun
-> ```
-
----
-
-## DB 스키마
+### DB 스키마
 
 ```sql
--- 강의
 CREATE TABLE courses (
     id             BIGSERIAL PRIMARY KEY,
     creator_id     BIGINT         NOT NULL,
@@ -57,38 +28,62 @@ CREATE TABLE courses (
     capacity       INT            NOT NULL,
     start_date     DATE           NOT NULL,
     end_date       DATE           NOT NULL,
-    status         VARCHAR(20)    NOT NULL,  -- DRAFT | OPEN | CLOSED
+    status         VARCHAR(20)    NOT NULL DEFAULT 'DRAFT',
     enrolled_count INT            NOT NULL DEFAULT 0
 );
 
--- 수강 신청
 CREATE TABLE enrollments (
     id           BIGSERIAL PRIMARY KEY,
     user_id      BIGINT       NOT NULL,
     course_id    BIGINT       NOT NULL REFERENCES courses(id),
-    status       VARCHAR(20)  NOT NULL,  -- PENDING | CONFIRMED | CANCELLED
+    status       VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
     confirmed_at TIMESTAMP,
     cancelled_at TIMESTAMP,
     created_at   TIMESTAMP    NOT NULL
 );
 ```
 
-### 관계
+---
 
-```
-courses 1 ──── * enrollments
-```
+## 기술 스택
 
-- `enrolled_count`: CONFIRMED 상태 기준으로 집계 (PENDING은 자리 미점유)
-- 인증/인가는 `X-User-Id` 헤더로 처리하며 별도 users 테이블 없음
+- **Language**: Java 17
+- **Framework**: Spring Boot 3.5.14
+- **ORM**: Spring Data JPA (Hibernate)
+- **DB**: PostgreSQL 16
+- **Build**: Gradle
+- **Test**: JUnit 5, Mockito, Testcontainers
 
 ---
 
-## API 명세
+## 실행 방법
+
+### 사전 요구사항
+- Docker
+
+### 애플리케이션 실행 (Docker)
+
+PostgreSQL + Spring Boot 앱을 한 번에 실행합니다.
+
+```bash
+docker-compose up --build
+```
+
+`http://localhost:8080` 으로 접근할 수 있습니다.
+
+### 테스트 실행
+
+Testcontainers가 PostgreSQL 컨테이너를 자동으로 실행합니다. Docker와 Java 17이 필요합니다.
+
+```bash
+./gradlew test
+```
+
+### API 명세
 
 모든 요청에 `X-User-Id: {userId}` 헤더가 필요합니다.
 
-### 응답 포맷
+**응답 포맷**
 
 ```json
 // 성공
@@ -98,186 +93,26 @@ courses 1 ──── * enrollments
 { "data": null, "error": { "code": "에러코드", "message": "설명" } }
 ```
 
----
+**강의 API**
 
-### 강의 API
+| Method | Path | 설명 | 권한 |
+|---|---|---|---|
+| POST | /api/courses | 강의 등록 | 누구나 |
+| GET | /api/courses | 강의 목록 조회 (?status=OPEN) | 누구나 |
+| GET | /api/courses/{id} | 강의 상세 조회 | 누구나 |
+| PATCH | /api/courses/{id}/status | 강의 상태 변경 | 크리에이터 본인 |
 
-#### 강의 등록
+**수강 신청 API**
 
-```
-POST /api/courses
-X-User-Id: 1
-Content-Type: application/json
+| Method | Path | 설명 | 권한 |
+|---|---|---|---|
+| POST | /api/enrollments | 수강 신청 | 수강생 (크리에이터 본인 제외) |
+| POST | /api/enrollments/{id}/confirm | 결제 확정 | 신청자 본인 |
+| POST | /api/enrollments/{id}/cancel | 수강 취소 | 신청자 본인 |
+| GET | /api/enrollments/me | 내 수강 신청 목록 | 본인 |
+| GET | /api/courses/{id}/enrollments | 수강생 목록 | 크리에이터 본인 |
 
-{
-  "title": "Spring Boot 완전 정복",
-  "description": "강의 설명",
-  "price": 99000,
-  "capacity": 30,
-  "startDate": "2026-06-01",
-  "endDate": "2026-08-31"
-}
-```
-
-```json
-// 201 Created
-{
-  "data": {
-    "id": 1,
-    "creatorId": 1,
-    "title": "Spring Boot 완전 정복",
-    "description": "강의 설명",
-    "price": 99000,
-    "capacity": 30,
-    "startDate": "2026-06-01",
-    "endDate": "2026-08-31",
-    "status": "DRAFT",
-    "enrolledCount": 0
-  },
-  "error": null
-}
-```
-
-#### 강의 목록 조회
-
-```
-GET /api/courses?status=OPEN
-X-User-Id: 1
-```
-
-```json
-// 200 OK
-{
-  "data": [ { ... }, { ... } ],
-  "error": null
-}
-```
-
-#### 강의 상세 조회
-
-```
-GET /api/courses/1
-X-User-Id: 1
-```
-
-#### 강의 상태 변경
-
-상태 전이: `DRAFT → OPEN → CLOSED` (역방향 불가, 크리에이터 본인만 가능)
-
-```
-PATCH /api/courses/1/status
-X-User-Id: 1
-Content-Type: application/json
-
-{ "status": "OPEN" }
-```
-
-```json
-// 200 OK
-{
-  "data": { "id": 1, "status": "OPEN", ... },
-  "error": null
-}
-```
-
----
-
-### 수강 신청 API
-
-#### 수강 신청
-
-```
-POST /api/enrollments
-X-User-Id: 2
-Content-Type: application/json
-
-{ "courseId": 1 }
-```
-
-```json
-// 201 Created
-{
-  "data": {
-    "id": 1,
-    "userId": 2,
-    "courseId": 1,
-    "status": "PENDING",
-    "confirmedAt": null,
-    "cancelledAt": null,
-    "createdAt": "2026-05-19T10:00:00"
-  },
-  "error": null
-}
-```
-
-#### 결제 확정
-
-```
-POST /api/enrollments/1/confirm
-X-User-Id: 2
-```
-
-```json
-// 200 OK
-{
-  "data": {
-    "id": 1,
-    "status": "CONFIRMED",
-    "confirmedAt": "2026-05-19T10:05:00",
-    ...
-  },
-  "error": null
-}
-```
-
-#### 수강 취소
-
-CONFIRMED 상태는 결제 후 7일 이내만 취소 가능합니다.
-
-```
-POST /api/enrollments/1/cancel
-X-User-Id: 2
-```
-
-```json
-// 200 OK
-{
-  "data": { "id": 1, "status": "CANCELLED", ... },
-  "error": null
-}
-```
-
-#### 내 수강 신청 목록
-
-```
-GET /api/enrollments/me?page=0&size=20
-X-User-Id: 2
-```
-
-```json
-// 200 OK
-{
-  "data": {
-    "content": [ { ... } ],
-    "totalElements": 1,
-    "totalPages": 1,
-    "number": 0,
-    "size": 20
-  },
-  "error": null
-}
-```
-
-#### 수강생 목록 조회 (크리에이터 전용)
-
-```
-GET /api/courses/1/enrollments?page=0&size=20
-X-User-Id: 1
-```
-
----
-
-### 에러 코드
+**에러 코드**
 
 | 코드 | HTTP | 설명 |
 |---|---|---|
@@ -286,15 +121,30 @@ X-User-Id: 1
 | `COURSE_NOT_OPEN` | 400 | OPEN 상태가 아닌 강의에 신청 |
 | `COURSE_FULL` | 409 | 정원 초과 |
 | `ALREADY_ENROLLED` | 409 | 중복 신청 |
-| `INVALID_STATUS_TRANSITION` | 409 | 잘못된 상태 전이 |
+| `INVALID_STATUS_TRANSITION` | 400 | 잘못된 상태 전이 |
 | `CANCEL_PERIOD_EXPIRED` | 409 | 취소 가능 기간(7일) 초과 |
+| `CREATOR_CANNOT_ENROLL` | 400 | 크리에이터가 본인 강의에 신청 |
 | `UNAUTHORIZED` | 403 | 권한 없음 |
 | `MISSING_HEADER` | 400 | X-User-Id 헤더 누락 |
 | `INVALID_INPUT` | 400 | 입력값 유효성 오류 |
 
 ---
 
-## 설계 결정
+## 요구사항 해석 및 가정
+
+| 항목 | 해석 / 가정 |
+|---|---|
+| 도메인 클래스명 | `Class`는 Java 예약어이므로 `Course`로 명명, API path는 `/api/courses` 유지 |
+| 정원 집계 기준 | `enrolledCount`는 CONFIRMED 기준. PENDING은 자리를 점유하지 않음. 신청만 하고 결제하지 않은 사용자가 정원을 독점하는 상황을 방지하기 위함 |
+| 사용자 식별 | 별도 인증 서버 없이 `X-User-Id` 헤더 값을 신뢰하여 사용자 식별. 크리에이터/수강생 역할 구분 없이 컨텍스트(강의 creatorId와 요청자 비교)로 권한 판단 |
+| 결제 처리 | 외부 PG 연동 없이 `POST /enrollments/{id}/confirm` 호출 자체를 결제 완료로 간주 |
+| 크리에이터 수강 신청 | 요구사항에 명시되지 않았으나, 자신이 개설한 강의에 본인이 수강 신청하는 것은 비정상적 흐름으로 판단하여 차단 (`CREATOR_CANNOT_ENROLL`) |
+| users 테이블 | 별도 사용자 테이블 없음. userId는 헤더에서 전달되는 Long 값으로만 관리 |
+| 대기열 통보 시점 | 취소 발생 시 자동 승격이 아닌, 알림 시스템을 통해 대기자에게 통보하는 방식으로 해석. 대기자가 직접 confirm 호출로 수강 확정 |
+
+---
+
+## 설계 결정과 이유
 
 ### 정원 관리 기준
 PENDING은 정원을 점유하지 않고, CONFIRMED 기준으로 집계합니다.
@@ -311,10 +161,9 @@ PENDING은 정원을 점유하지 않고, CONFIRMED 기준으로 집계합니다
 비관적 락은 정합성을 보장하는 대신 confirm 처리가 직렬화됩니다. 동시 요청이 많을수록 대기 시간이 늘어나고, 대기 중인 요청도 DB 커넥션을 점유하기 때문에 트래픽이 극단적으로 몰리는 경우 커넥션 풀 고갈로 이어질 수 있습니다. 이 경우 confirm 요청을 큐에 적재하고 워커가 순차 처리하는 방식으로 전환하면 커넥션 낭비 없이 더 많은 요청을 수용할 수 있습니다. 다만 클라이언트에게 즉시 성공/실패 대신 비동기 응답을 제공해야 하는 UX 변화가 따릅니다.
 
 ### 대기열(Waitlist)
-정원이 초과된 강의에 신청하면 PENDING 상태로 대기열에 등록됩니다. CONFIRMED 수강생이 취소하면 enrolledCount가 감소하고, 현재 코드에서는 구현하지 않았지만 알림 시스템을 통해 대기열의 가장 오래된 순서의 사용자에게 자리가 났음을 통보하도록 로직을 설계할 수 있습니다. 통보받은 사용자가 직접 confirm API를 호출해 수강을 확정하며, 미응답 시 다음 대기자에게 기회가 넘어갑니다.
+정원이 초과된 강의에 신청하면 PENDING 상태로 대기열에 등록됩니다. CONFIRMED 수강생이 취소하면 enrolledCount가 감소하고, 알림 시스템을 통해 대기열의 가장 오래된 순서의 사용자에게 자리가 났음을 통보합니다. 통보받은 사용자가 직접 confirm API를 호출해 수강을 확정하며, 미응답 시 다음 대기자에게 기회가 넘어갑니다.
 
 별도의 큐 자료구조 없이 `enrollments` 테이블의 `created_at ASC` 정렬로 대기 순서를 관리합니다.
-
 
 ### 비즈니스 로직 위치
 상태 전이 규칙과 검증 로직을 서비스가 아닌 엔티티(`Course`, `Enrollment`) 안에 위치시켰습니다.
@@ -333,9 +182,7 @@ public void cancel() {
 }
 ```
 
----
-
-## 테스트
+### 테스트 전략
 
 | 종류 | 대상 | 도구 |
 |---|---|---|
@@ -350,13 +197,26 @@ H2 대신 Testcontainers(PostgreSQL)를 사용한 이유: H2는 Pessimistic Lock
 
 ---
 
-## AI 사용 내역
+## 미구현 / 제약사항
 
-Claude(claude-sonnet-4-6)를 활용하여 개발을 진행했습니다.
+| 항목 | 내용 |
+|---|---|
+| 알림 시스템 | 취소 발생 시 대기자에게 자리가 났음을 통보하는 기능 미구현. 실제 서비스라면 이메일·푸시 알림 등 외부 알림 서비스 연동 필요 |
+| 결제 시스템 | 실제 PG(Payment Gateway) 연동 없음. confirm API 호출 자체를 결제 완료로 간주 |
+| 인증 / 인가 | JWT, OAuth 등 실제 인증 메커니즘 없음. `X-User-Id` 헤더를 신뢰하는 단순 구조로, 프로덕션 환경에서는 게이트웨이 또는 인터셉터 레벨의 인증이 필요 |
+| Rate Limiting | 동시 신청 폭주 시 API 레벨의 요청 제한 없음. 비관적 락으로 데이터 정합성은 보장하지만, DB 커넥션 풀 고갈 방지를 위한 Rate Limit 또는 큐 도입 검토 필요 |
+| 강의 삭제 | 강의 삭제 API 미구현. DRAFT 상태 강의의 삭제 또는 소프트 딜리트 처리는 요구사항에 없어 제외 |
+| 사용자 관리 | users 테이블 없음. 크리에이터/수강생 역할 구분 없이 X-User-Id 헤더 값으로만 처리 |
+
+---
+
+## AI 활용 범위
+
+Claude Code를 활용하여 개발을 진행했습니다.
 
 - **설계 논의**: 도메인 모델, 정원 관리 기준, 동시성 제어 전략(비관적 락 vs 낙관적 락 vs 큐) 등 설계 결정 시 트레이드오프를 함께 검토
 - **코드 구현**: 엔티티, 서비스, 컨트롤러, 테스트 코드 작성
 - **코드 리뷰**: 비즈니스 로직 누락, 엣지 케이스, 테스트 커버리지 검토
 - **버그 수정**: Testcontainers 컨텍스트 캐싱 문제, 단위 테스트 Mock 불일치 등
 
-각 설계 결정(정원 관리 기준, 락 전략, 대기자 승격 방식 등)은 AI가 제시한 옵션을 바탕으로 본인이 직접 판단하고 선택했습니다. 코드 역시 동작 원리를 이해하고 검증한 후 채택했습니다.
+각 설계 결정(정원 관리 기준, 락 전략, 대기자 승격 방식 등)은 AI가 제시한 옵션을 바탕으로 직접 판단하고 선택했습니다. 코드 역시 동작 원리를 이해하고 검증한 후 채택했습니다.
