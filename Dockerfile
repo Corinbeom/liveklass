@@ -3,8 +3,8 @@ FROM eclipse-temurin:17-jdk AS builder
 WORKDIR /app
 COPY gradlew .
 COPY gradle gradle
-COPY build.gradle.kts .
-COPY settings.gradle.kts .
+COPY build.gradle .
+COPY settings.gradle .
 COPY src src
 RUN ./gradlew bootJar -x test
 
