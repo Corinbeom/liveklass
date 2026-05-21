@@ -71,6 +71,8 @@ docker-compose up --build
 
 `http://localhost:8080` 으로 접근할 수 있습니다.
 
+Swagger UI: `http://localhost:8080/swagger-ui.html`
+
 ### 테스트 실행
 
 Testcontainers가 PostgreSQL 컨테이너를 자동으로 실행합니다. Docker와 Java 17이 필요합니다.
@@ -110,6 +112,7 @@ Testcontainers가 PostgreSQL 컨테이너를 자동으로 실행합니다. Docke
 | POST | /api/enrollments/{id}/confirm | 결제 확정 | 신청자 본인 |
 | POST | /api/enrollments/{id}/cancel | 수강 취소 | 신청자 본인 |
 | GET | /api/enrollments/me | 내 수강 신청 목록 | 본인 |
+| GET | /api/courses/{id}/waitlist/me | 내 대기 순번 조회 | 본인 |
 | GET | /api/courses/{id}/enrollments | 수강생 목록 | 크리에이터 본인 |
 
 **에러 코드**
