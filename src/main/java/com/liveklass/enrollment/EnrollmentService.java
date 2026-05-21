@@ -21,15 +21,19 @@ public class EnrollmentService {
 
     private final EnrollmentRepository enrollmentRepository;
     private final CourseRepository courseRepository;
+    private final WaitlistRepository waitlistRepository;
 
-    public EnrollmentService(EnrollmentRepository enrollmentRepository, CourseRepository courseRepository) {
+    public EnrollmentService(EnrollmentRepository enrollmentRepository,
+                             CourseRepository courseRepository,
+                             WaitlistRepository waitlistRepository) {
         this.enrollmentRepository = enrollmentRepository;
         this.courseRepository = courseRepository;
+        this.waitlistRepository = waitlistRepository;
     }
 
     @Transactional
     public EnrollmentResponse enroll(Long userId, EnrollmentRequest request) {
-        Course course = courseRepository.findById(request.courseId())
+        Course course = courseRepository.findByIdWithLock(request.courseId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
 
         if (course.getStatus() != CourseStatus.OPEN) {
@@ -47,8 +51,51 @@ public class EnrollmentService {
             throw new BusinessException(ErrorCode.ALREADY_ENROLLED);
         }
 
+        if (waitlistRepository.existsByUserIdAndCourseId(userId, course.getId())) {
+            throw new BusinessException(ErrorCode.ALREADY_IN_WAITLIST);
+        }
+
+        long pendingCount = enrollmentRepository.countByCourseIdAndStatus(course.getId(), EnrollmentStatus.PENDING);
+        if (course.getEnrolledCount() + pendingCount >= course.getCapacity()) {
+            throw new BusinessException(ErrorCode.COURSE_FULL);
+        }
+
         Enrollment enrollment = new Enrollment(userId, course.getId());
         return EnrollmentResponse.from(enrollmentRepository.save(enrollment));
+    }
+
+    @Transactional
+    public WaitlistPositionResponse joinWaitlist(Long courseId, Long userId) {
+        Course course = courseRepository.findByIdWithLock(courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+
+        if (course.getStatus() != CourseStatus.OPEN) {
+            throw new BusinessException(ErrorCode.COURSE_NOT_OPEN);
+        }
+
+        if (course.getCreatorId().equals(userId)) {
+            throw new BusinessException(ErrorCode.CREATOR_CANNOT_ENROLL);
+        }
+
+        boolean alreadyEnrolled = enrollmentRepository.existsByUserIdAndCourseIdAndStatusIn(
+                userId, courseId, List.of(EnrollmentStatus.PENDING, EnrollmentStatus.CONFIRMED)
+        );
+        if (alreadyEnrolled) {
+            throw new BusinessException(ErrorCode.ALREADY_ENROLLED);
+        }
+
+        if (waitlistRepository.existsByUserIdAndCourseId(userId, courseId)) {
+            throw new BusinessException(ErrorCode.ALREADY_IN_WAITLIST);
+        }
+
+        long pendingCount = enrollmentRepository.countByCourseIdAndStatus(courseId, EnrollmentStatus.PENDING);
+        if (course.getEnrolledCount() + pendingCount < course.getCapacity()) {
+            throw new BusinessException(ErrorCode.COURSE_NOT_FULL);
+        }
+
+        Waitlist waitlist = waitlistRepository.save(new Waitlist(courseId, userId));
+        long position = waitlistRepository.countByCourseIdAndCreatedAtBefore(courseId, waitlist.getCreatedAt()) + 1;
+        return WaitlistPositionResponse.of(waitlist, position);
     }
 
     @Transactional
@@ -59,10 +106,6 @@ public class EnrollmentService {
 
         Course course = courseRepository.findByIdWithLock(enrollment.getCourseId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
-
-        if (course.isFull()) {
-            throw new BusinessException(ErrorCode.COURSE_FULL);
-        }
 
         enrollment.confirm();
         course.increaseEnrolledCount();
@@ -79,29 +122,41 @@ public class EnrollmentService {
         boolean wasConfirmed = enrollment.getStatus() == EnrollmentStatus.CONFIRMED;
         enrollment.cancel();
 
+        Course course = courseRepository.findByIdWithLock(enrollment.getCourseId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
+
         if (wasConfirmed) {
-            Course course = courseRepository.findByIdWithLock(enrollment.getCourseId())
-                    .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
             course.decreaseEnrolledCount();
-            // 자리가 생기면 알림 시스템을 통해 대기자에게 통보하고,
-            // 대기자가 직접 confirm API를 호출해 수강을 확정합니다.
         }
 
+        // CONFIRMED/PENDING 취소 모두 빈 자리를 대기열 1번에게 승격
+        waitlistRepository.findFirstByCourseIdOrderByCreatedAtAsc(enrollment.getCourseId())
+                .ifPresent(waitlist -> {
+                    enrollmentRepository.save(new Enrollment(waitlist.getUserId(), waitlist.getCourseId()));
+                    waitlistRepository.delete(waitlist);
+                });
+
         return EnrollmentResponse.from(enrollment);
+    }
+
+    @Transactional
+    public void leaveWaitlist(Long courseId, Long userId) {
+        Waitlist waitlist = waitlistRepository.findByUserIdAndCourseId(userId, courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WAITLIST_NOT_FOUND));
+        waitlistRepository.delete(waitlist);
+    }
+
+    public WaitlistPositionResponse getWaitlistPosition(Long courseId, Long userId) {
+        Waitlist waitlist = waitlistRepository.findByUserIdAndCourseId(userId, courseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WAITLIST_NOT_FOUND));
+
+        long position = waitlistRepository.countByCourseIdAndCreatedAtBefore(courseId, waitlist.getCreatedAt()) + 1;
+        return WaitlistPositionResponse.of(waitlist, position);
     }
 
     public Page<EnrollmentResponse> findMyEnrollments(Long userId, Pageable pageable) {
         return enrollmentRepository.findByUserId(userId, pageable)
                 .map(EnrollmentResponse::from);
-    }
-
-    public WaitlistPositionResponse getWaitlistPosition(Long courseId, Long userId) {
-        Enrollment enrollment = enrollmentRepository.findByUserIdAndCourseIdAndStatus(
-                userId, courseId, EnrollmentStatus.PENDING)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
-
-        long position = enrollmentRepository.countPendingBefore(courseId, enrollment.getCreatedAt()) + 1;
-        return new WaitlistPositionResponse(enrollment.getId(), courseId, position);
     }
 
     public Page<EnrollmentResponse> findByCourse(Long courseId, Long requesterId, Pageable pageable) {

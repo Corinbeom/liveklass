@@ -25,7 +25,7 @@ public class EnrollmentController {
         this.enrollmentService = enrollmentService;
     }
 
-    @Operation(summary = "수강 신청", description = "OPEN 상태인 강의에 수강 신청합니다. 신청 즉시 PENDING 상태가 되며, 크리에이터 본인은 신청할 수 없습니다. 정원이 초과되어도 PENDING으로 대기 등록됩니다.")
+    @Operation(summary = "수강 신청", description = "OPEN 강의에 수강 신청합니다. 자리가 있으면 PENDING, 없으면 409를 반환합니다. 크리에이터 본인은 신청 불가.")
     @PostMapping("/enrollments")
     public ResponseEntity<ApiResponse<EnrollmentResponse>> enroll(
             @RequestHeader("X-User-Id") Long userId,
@@ -34,7 +34,7 @@ public class EnrollmentController {
                 .body(ApiResponse.success(enrollmentService.enroll(userId, request)));
     }
 
-    @Operation(summary = "결제 확정", description = "PENDING 상태의 수강 신청을 CONFIRMED로 전환합니다. 정원이 꽉 찬 경우 409를 반환합니다. 본인 신청만 확정할 수 있습니다.")
+    @Operation(summary = "결제 확정", description = "PENDING 상태의 수강 신청을 CONFIRMED로 전환합니다. 본인 신청만 확정 가능.")
     @PostMapping("/enrollments/{id}/confirm")
     public ResponseEntity<ApiResponse<EnrollmentResponse>> confirm(
             @PathVariable Long id,
@@ -42,7 +42,7 @@ public class EnrollmentController {
         return ResponseEntity.ok(ApiResponse.success(enrollmentService.confirm(id, userId)));
     }
 
-    @Operation(summary = "수강 취소", description = "수강 신청을 취소합니다. CONFIRMED 상태는 결제 확정 후 7일 이내만 취소 가능합니다. 취소 시 enrolledCount가 감소합니다.")
+    @Operation(summary = "수강 취소", description = "수강 신청을 취소합니다. CONFIRMED는 결제 후 7일 이내만 취소 가능. 취소 시 대기열 1번이 자동으로 PENDING 승격됩니다.")
     @PostMapping("/enrollments/{id}/cancel")
     public ResponseEntity<ApiResponse<EnrollmentResponse>> cancel(
             @PathVariable Long id,
@@ -58,7 +58,16 @@ public class EnrollmentController {
         return ResponseEntity.ok(ApiResponse.success(enrollmentService.findMyEnrollments(userId, pageable)));
     }
 
-    @Operation(summary = "대기 순번 조회", description = "특정 강의의 내 대기 순번을 조회합니다. PENDING 상태인 경우에만 조회 가능합니다.")
+    @Operation(summary = "대기열 등록", description = "정원이 가득 찬 강의의 대기열에 등록합니다. 내 대기 순번을 반환합니다.")
+    @PostMapping("/courses/{courseId}/waitlist")
+    public ResponseEntity<ApiResponse<WaitlistPositionResponse>> joinWaitlist(
+            @PathVariable Long courseId,
+            @RequestHeader("X-User-Id") Long userId) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(enrollmentService.joinWaitlist(courseId, userId)));
+    }
+
+    @Operation(summary = "대기 순번 조회", description = "내 대기 순번을 조회합니다. 대기열에 등록된 경우에만 조회 가능.")
     @GetMapping("/courses/{courseId}/waitlist/me")
     public ResponseEntity<ApiResponse<WaitlistPositionResponse>> getWaitlistPosition(
             @PathVariable Long courseId,
@@ -66,7 +75,16 @@ public class EnrollmentController {
         return ResponseEntity.ok(ApiResponse.success(enrollmentService.getWaitlistPosition(courseId, userId)));
     }
 
-    @Operation(summary = "수강생 목록 조회", description = "강의별 수강생 목록을 조회합니다. 해당 강의의 크리에이터만 조회할 수 있습니다.")
+    @Operation(summary = "대기열 이탈", description = "대기열에서 이탈합니다.")
+    @DeleteMapping("/courses/{courseId}/waitlist/me")
+    public ResponseEntity<ApiResponse<Void>> leaveWaitlist(
+            @PathVariable Long courseId,
+            @RequestHeader("X-User-Id") Long userId) {
+        enrollmentService.leaveWaitlist(courseId, userId);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    @Operation(summary = "수강생 목록 조회", description = "강의별 수강생 목록을 조회합니다. 해당 강의의 크리에이터만 조회 가능.")
     @GetMapping("/courses/{courseId}/enrollments")
     public ResponseEntity<ApiResponse<Page<EnrollmentResponse>>> findByCourse(
             @PathVariable Long courseId,
